@@ -1,0 +1,74 @@
+services:
+  db:
+    image: postgres:15
+    container_name: fintech-db
+    environment:
+      POSTGRES_USER: fintech
+      POSTGRES_PASSWORD: fintechpass
+      POSTGRES_DB: fintech
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fintech"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ml-services:
+    build: ./ml-services
+    container_name: fintech-ml-services
+    environment:
+      PYTHONUNBUFFERED: "1"
+      CLAUDE_API_KEY: ""
+    ports:
+      - "8000:8000"
+
+  backend:
+    build: ./backend
+    container_name: fintech-backend
+    depends_on:
+      db:
+        condition: service_healthy
+      ml-services:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: fintech
+      DB_PASSWORD: fintechpass
+      DB_NAME: fintech
+      JWT_SECRET: supersecretjwt
+      JWT_REFRESH_SECRET: supersecretrefresh
+      ML_SERVICE_URL: http://ml-services:8000
+      YAHOO_FINANCE_BASE_URL: https://query1.finance.yahoo.com
+    ports:
+      - "4000:4000"
+    command: >
+      sh -c "
+      node src/scripts/dbSync.js &&
+      node src/scripts/seed.js &&
+      node src/index.js
+      "
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    build: ./frontend
+    container_name: fintech-frontend
+    depends_on:
+      - backend
+    environment:
+      VITE_API_BASE_URL: http://localhost:4000/api
+    ports:
+      - "5173:5173"
+    restart: always
+
+volumes:
+  db-data:
